@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 const API_URL = 'http://localhost:5000/api/tasks'
-const TASKS_PER_PAGE = 10
+const TASKS_PER_PAGE = 5
 
 interface Task {
   uuid: string
@@ -23,8 +23,8 @@ interface TasksResponse {
 function App() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
-  const [skip, setSkip] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
 
   const [newTitle, setNewTitle] = useState('')
   const [newDescription, setNewDescription] = useState('')
@@ -33,22 +33,18 @@ function App() {
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
 
-  const bottomOfListRef = useRef<HTMLDivElement | null>(null)
+  const totalPages = Math.ceil(total / TASKS_PER_PAGE)
 
-  const loadTasks = useCallback(async (skipAmount: number) => {
+  const loadTasks = useCallback(async (page: number) => {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_URL}?skip=${skipAmount}&limit=${TASKS_PER_PAGE}`)
+      const skip = (page - 1) * TASKS_PER_PAGE
+      const response = await fetch(`${API_URL}?skip=${skip}&limit=${TASKS_PER_PAGE}`)
       const result: TasksResponse = await response.json()
 
-      if (skipAmount === 0) {
-        setTasks(result.data)
-      } else {
-        setTasks((existingTasks) => [...existingTasks, ...result.data])
-      }
-
-      setHasMore(result.hasMore)
+      setTasks(result.data)
+      setTotal(result.total)
     } catch (error) {
       console.error('Could not load tasks:', error)
     } finally {
@@ -57,31 +53,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    loadTasks(0)
-  }, [loadTasks])
-
-  useEffect(() => {
-    if (skip > 0) {
-      loadTasks(skip)
-    }
-  }, [skip, loadTasks])
-
-  useEffect(() => {
-    if (loading || !hasMore) return
-
-    const observer = new IntersectionObserver((entries) => {
-      const bottomIsVisible = entries[0].isIntersecting
-      if (bottomIsVisible) {
-        setSkip((currentSkip) => currentSkip + TASKS_PER_PAGE)
-      }
-    })
-
-    if (bottomOfListRef.current) {
-      observer.observe(bottomOfListRef.current)
-    }
-
-    return () => observer.disconnect()
-  }, [loading, hasMore])
+    loadTasks(currentPage)
+  }, [currentPage, loadTasks])
 
   // Function for adding task
   const handleAddTask = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -89,7 +62,7 @@ function App() {
 
     if (!newTitle.trim()) return
 
-    const response = await fetch(API_URL, {
+    await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -98,11 +71,10 @@ function App() {
       }),
     })
 
-    const createdTask: Task = await response.json()
-
-    setTasks((existingTasks) => [createdTask, ...existingTasks])
     setNewTitle('')
     setNewDescription('')
+    loadTasks(1)
+    setCurrentPage(1)
   }
 
   const handleToggleComplete = async (taskUuid: string, currentlyCompleted: boolean) => {
@@ -160,8 +132,10 @@ function App() {
   }
 
   const handleDeleteTask = async (taskUuid: string) => {
-    setTasks((existingTasks) => existingTasks.filter((task) => task.uuid !== taskUuid))
     await fetch(`${API_URL}/${taskUuid}`, { method: 'DELETE' })
+    const page = tasks.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage
+    setCurrentPage(page)
+    loadTasks(page)
   }
 
   return (
@@ -261,12 +235,29 @@ function App() {
         ))}
       </ul>
 
-      {loading && <p className="text-center text-gray-500 py-3">Loading...</p>}
-      {!hasMore && tasks.length > 0 && (
-        <p className="text-center text-gray-500 py-3">No more tasks</p>
-      )}
-
-      <div ref={bottomOfListRef} className="h-px" />
+      <div className="flex items-center justify-center gap-3 py-4">
+        <button
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          disabled={currentPage === 1 || loading}
+          className="px-3 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+        >
+          Previous
+        </button>
+        {loading ? (
+          <span className="text-sm text-gray-500">Loading...</span>
+        ) : (
+          <span className="text-sm text-gray-700">
+            Page {currentPage} of {totalPages || 1}
+          </span>
+        )}
+        <button
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages || totalPages === 0 || loading}
+          className="px-3 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+        >
+          Next
+        </button>
+      </div>
     </section>
   )
 }
